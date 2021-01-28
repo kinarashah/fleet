@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"k8s.io/api/core/v1"
 	"net/http"
 	"net/url"
 	"strings"
@@ -40,6 +41,7 @@ type Options struct {
 	ClientID        string
 	Generation      string
 	CheckinInterval string
+	AgentEnvVars []v1.EnvVar
 }
 
 func AgentToken(ctx context.Context, controllerNamespace string, client *client.Client, tokenName string, opts *Options) ([]runtime.Object, error) {
@@ -123,7 +125,7 @@ func AgentManifest(ctx context.Context, systemNamespace, controllerNamespace str
 		return err
 	}
 
-	objs = append(objs, agent.Manifest(controllerNamespace, cfg.AgentImage, cfg.AgentImagePullPolicy, opts.Generation, opts.CheckinInterval)...)
+	objs = append(objs, agent.Manifest(controllerNamespace, cfg.AgentImage, cfg.AgentImagePullPolicy, opts.Generation, opts.CheckinInterval, opts.AgentEnvVars)...)
 
 	data, err := yaml.Export(objs...)
 	if err != nil {
