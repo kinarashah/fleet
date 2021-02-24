@@ -985,6 +985,13 @@ func (in *ClusterStatus) DeepCopyInto(out *ClusterStatus) {
 	}
 	out.Display = in.Display
 	in.Agent.DeepCopyInto(&out.Agent)
+	if in.AgentDeployedEnvVars != nil {
+		in, out := &in.AgentDeployedEnvVars, &out.AgentDeployedEnvVars
+		*out = make([]corev1.EnvVar, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
 	return
 }
 
