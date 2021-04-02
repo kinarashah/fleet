@@ -2,6 +2,7 @@ package manageagent
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/rancher/fleet/pkg/agent"
 	fleet "github.com/rancher/fleet/pkg/apis/fleet.cattle.io/v1alpha1"
@@ -15,6 +16,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -45,6 +47,7 @@ func Register(ctx context.Context,
 	}
 
 	namespace.OnChange(ctx, "manage-agent", h.OnNamespace)
+	clusters.OnChange(ctx, "manage-agent-cluster", h.OnCluster)
 	relatedresource.WatchClusterScoped(ctx, "manage-agent-resolver", h.resolveNS, namespace, clusters)
 }
 
@@ -55,6 +58,12 @@ func (h *handler) resolveNS(namespace, name string, obj runtime.Object) ([]relat
 		}
 	}
 	return nil, nil
+}
+
+func (h *handler) OnCluster(key string, cluster *fleet.Cluster) (*fleet.Cluster, error) {
+	logrus.Infof("manageAgentCluster: entered onCluster")
+	
+	return cluster, nil
 }
 
 func (h *handler) OnNamespace(key string, namespace *corev1.Namespace) (*corev1.Namespace, error) {
@@ -71,19 +80,29 @@ func (h *handler) OnNamespace(key string, namespace *corev1.Namespace) (*corev1.
 		return namespace, nil
 	}
 
-	objs, err := h.getAgentBundle(namespace.Name)
-	if err != nil {
-		return nil, err
+	if namespace.Name != "fleet-default" {
+			logrus.Infof("manageAgent: returning from onNamespace: %s", namespace.Name)
+			return namespace, nil
 	}
 
-	return namespace, h.apply.
-		WithOwner(namespace).
-		WithDefaultNamespace(namespace.Name).
-		WithListerNamespace(namespace.Name).
-		ApplyObjects(objs...)
+	for _, cluster := range clusters {
+		logrus.Infof("manageAgent: trying to get agent bundle %s %s", namespace.Name, cluster.Name)
+		objs, err := h.getAgentBundle(namespace.Name, cluster)
+		if err != nil {
+			return nil, err
+		}
+
+		err = h.apply.ApplyObjects(objs...)
+		if err != nil {
+			logrus.Errorf("error applying objects %v", err)
+			return nil, err
+		}
+	}
+
+	return namespace, nil
 }
 
-func (h *handler) getAgentBundle(ns string) ([]runtime.Object, error) {
+func (h *handler) getAgentBundle(ns string, cluster *fleet.Cluster) ([]runtime.Object, error) {
 	cfg := config.Get()
 	if cfg.ManageAgent != nil && !*cfg.ManageAgent {
 		return nil, nil
@@ -98,7 +117,7 @@ func (h *handler) getAgentBundle(ns string) ([]runtime.Object, error) {
 	return []runtime.Object{
 		&fleet.Bundle{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      agentBundleName,
+				Name:      fmt.Sprintf("%s-%s",agentBundleName, cluster.Name),
 				Namespace: ns,
 			},
 			Spec: fleet.BundleSpec{
@@ -124,6 +143,18 @@ func (h *handler) getAgentBundle(ns string) ([]runtime.Object, error) {
 								},
 							},
 						},
+					},
+
+					{ClusterSelector: &metav1.LabelSelector{
+						MatchExpressions: []metav1.LabelSelectorRequirement{
+							{
+								Key:      "management.cattle.io/cluster-name",
+								Operator: metav1.LabelSelectorOpIn,
+								Values: []string{cluster.Name},
+							},
+						},
+					},
+
 					},
 				},
 			},
